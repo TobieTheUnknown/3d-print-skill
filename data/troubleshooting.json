@@ -1,0 +1,274 @@
+{
+  "_meta": {
+    "purpose": "Lookup table for diagnosing FDM print defects from a webcam photo and mapping them to concrete OrcaSlicer setting changes.",
+    "sources": [
+      "https://help.prusa3d.com/article/stringing-and-oozing_1805",
+      "https://help.prusa3d.com/article/warping_2011",
+      "https://help.prusa3d.com/article/layer-separation-and-splitting-fdm_1806",
+      "https://help.prusa3d.com/article/clogged-nozzle-hotend-mk3-5-s-mk3s-mk2-5s_2008",
+      "https://help.prusa3d.com/article/skirt-and-brim_133969",
+      "https://help.prusa3d.com/article/elephant-foot-compensation_114487",
+      "https://www.simplify3d.com/resources/print-quality-troubleshooting/",
+      "https://wiki.bambulab.com/en/filament-acc/filament/print-quality/interlayer-cracking",
+      "https://www.orcaslicer.com/wiki/"
+    ]
+  },
+  "defects": [
+    {
+      "id": "stringing",
+      "name": "Stringing / oozing between parts",
+      "visual_id": "thin hair-like plastic strands between separate features or towers",
+      "causes": [
+        "Nozzle temperature too high, filament too runny while traveling",
+        "Retraction distance/speed insufficient for the extruder type",
+        "Travel moves crossing open space unnecessarily"
+      ],
+      "orca_settings": [
+        {"key": "nozzle_temperature", "direction": "decrease", "note": "lower by 5-10C"},
+        {"key": "retraction_length", "direction": "increase", "note": "direct-drive +0.5-1mm steps up to ~2mm; Bowden 3-7mm"},
+        {"key": "retraction_speed", "direction": "increase", "note": "try 25-45mm/s"},
+        {"key": "retraction_minimum_travel", "direction": "decrease", "note": "so retraction triggers on shorter moves"},
+        {"key": "wipe", "direction": "enable"},
+        {"key": "retract_before_wipe", "direction": "enable"},
+        {"key": "avoid_crossing_perimeters", "direction": "enable"}
+      ],
+      "hardware_fixes": ["check for worn/leaking nozzle if strings persist despite tuning"]
+    },
+    {
+      "id": "warping",
+      "name": "Warping / lifting off the bed (corner curling)",
+      "visual_id": "corners peeling upward, print detached at edges, base curled",
+      "causes": [
+        "Uneven cooling causing differential shrinkage (worse ABS/ASA, large flat parts)",
+        "Insufficient bed adhesion/temperature or poor first-layer squish",
+        "Drafts / ambient cooling on one side"
+      ],
+      "orca_settings": [
+        {"key": "hot_plate_temp", "direction": "increase", "note": "+5C"},
+        {"key": "hot_plate_temp_initial_layer", "direction": "increase", "note": "+5C"},
+        {"key": "fan_min_speed", "direction": "decrease", "note": "0-20% for ABS/ASA"},
+        {"key": "fan_max_speed", "direction": "decrease", "note": "0-20% for ABS/ASA"},
+        {"key": "brim_width", "direction": "increase", "note": "5-10mm+ for problem geometries, or use a raft"},
+        {"key": "elefant_foot_compensation", "direction": "adjust", "note": "only if base is also over-squished"}
+      ],
+      "hardware_fixes": ["clean bed with IPA", "glue stick for PLA", "enclosure + draft shield for ABS/ASA", "relevel bed"]
+    },
+    {
+      "id": "layer_shifting",
+      "name": "Layer shifting (X or Y offset mid-print)",
+      "visual_id": "clean horizontal offset/step in an otherwise vertical wall, all layers above shift consistently",
+      "causes": [
+        "Belt slipping / loose or stretched",
+        "Print speed or acceleration too high causing motor to skip steps",
+        "Loose pulley grub screws or motor driver overheating/undercurrent"
+      ],
+      "orca_settings": [
+        {"key": "outer_wall_speed", "direction": "decrease", "note": "diagnostic: ~50% reduction"},
+        {"key": "inner_wall_speed", "direction": "decrease"},
+        {"key": "travel_speed", "direction": "decrease"},
+        {"key": "default_acceleration", "direction": "decrease", "note": "try 500-1000mm/s2"},
+        {"key": "input_shaping_freq_x", "direction": "calibrate", "note": "allows higher speeds safely once hardware confirmed OK"},
+        {"key": "input_shaping_freq_y", "direction": "calibrate"}
+      ],
+      "hardware_fixes": ["primarily hardware: tighten/retension belts", "tighten pulley grub screws", "verify stepper driver current", "check for gantry obstruction", "check stepper driver overheating"]
+    },
+    {
+      "id": "elephants_foot",
+      "name": "Elephant's foot (bulging first layers)",
+      "visual_id": "base flares outward wider than the rest of the part, bulge in bottom 1-3 layers",
+      "causes": [
+        "Nozzle/Z-offset too low, over-squishing first layer",
+        "Bed temp too hot keeping bottom layers soft under weight above",
+        "Insufficient first-layer cooling"
+      ],
+      "orca_settings": [
+        {"key": "elefant_foot_compensation", "direction": "enable", "note": "start 80-90% width reduction (~0.1-0.2mm inset) over 1-2 layers"},
+        {"key": "hot_plate_temp_initial_layer", "direction": "decrease", "note": "5C steps"},
+        {"key": "fan_cooling_layer_time", "direction": "adjust", "note": "start cooling fan earlier, layer 2-3"}
+      ],
+      "hardware_fixes": ["re-level bed / recalibrate Z-offset (raise in +0.02-0.05mm increments)"]
+    },
+    {
+      "id": "poor_adhesion",
+      "name": "Poor first layer adhesion / not sticking",
+      "visual_id": "print detaches entirely from bed, corners lift immediately, spaghetti on bed",
+      "causes": [
+        "Bed not level or nozzle too far from bed",
+        "Bed surface dirty/greasy or temperature too low",
+        "First layer print speed too fast"
+      ],
+      "orca_settings": [
+        {"key": "initial_layer_line_width", "direction": "increase", "note": "more bed contact area"},
+        {"key": "hot_plate_temp_initial_layer", "direction": "increase", "note": "+5C"},
+        {"key": "initial_layer_speed", "direction": "decrease", "note": "~20-30mm/s"},
+        {"key": "initial_layer_infill_speed", "direction": "decrease"},
+        {"key": "brim_width", "direction": "increase"}
+      ],
+      "hardware_fixes": ["relevel bed (manual or auto mesh)", "clean bed with IPA/soap-water", "lower Z-offset carefully", "glue stick/hairspray for PLA"]
+    },
+    {
+      "id": "under_extrusion",
+      "name": "Under-extrusion (gaps, weak layers, thin walls)",
+      "visual_id": "visible gaps between extrusion lines, thin/see-through walls, missing material streaks",
+      "causes": [
+        "Nozzle partially clogged or temp too low for flow rate",
+        "Flow/extrusion multiplier miscalibrated (under 100%)",
+        "Wet filament or incorrect filament diameter setting"
+      ],
+      "orca_settings": [
+        {"key": "nozzle_temperature", "direction": "increase", "note": "+5-10C"},
+        {"key": "filament_flow_ratio", "direction": "increase", "note": "2-5% steps"},
+        {"key": "filament_diameter", "direction": "verify", "note": "measure actual filament with calipers"},
+        {"key": "outer_wall_speed", "direction": "decrease"},
+        {"key": "inner_wall_speed", "direction": "decrease"},
+        {"key": "wall_loops", "direction": "increase", "note": "only if walls are structurally too thin, separate from flow issue"}
+      ],
+      "hardware_fixes": ["cold-pull/clean nozzle", "dry filament", "check extruder gear isn't slipping", "check PTFE tube seating at hotend"]
+    },
+    {
+      "id": "over_extrusion",
+      "name": "Over-extrusion (blobs, dimensional inaccuracy)",
+      "visual_id": "oversized/bulging walls, blobby texture, parts too big vs tolerances",
+      "causes": [
+        "Flow ratio/extrusion multiplier too high (>100%)",
+        "Nozzle temp too high causing excess ooze/priming",
+        "Incorrect filament diameter setting"
+      ],
+      "orca_settings": [
+        {"key": "filament_flow_ratio", "direction": "decrease", "note": "2-5% decrements, calibrate via flow tower"},
+        {"key": "xy_hole_compensation", "direction": "adjust", "note": "for tight tolerances"},
+        {"key": "xy_contour_compensation", "direction": "adjust"},
+        {"key": "nozzle_temperature", "direction": "decrease", "note": "-5C"}
+      ],
+      "hardware_fixes": ["verify filament diameter with calipers at multiple points", "check for worn/oversized nozzle bore"]
+    },
+    {
+      "id": "ghosting_ringing",
+      "name": "Ghosting / ringing (wavy surface artifacts)",
+      "visual_id": "repeating wavy ripples on vertical walls near corners/holes, echo pattern after sharp direction change",
+      "causes": [
+        "Excess print-head momentum/vibration from high acceleration/jerk",
+        "Loose frame, belts, or gantry causing mechanical resonance",
+        "Print speed too high for the machine's rigidity"
+      ],
+      "orca_settings": [
+        {"key": "default_acceleration", "direction": "decrease", "note": "25-50% reduction, especially outer wall accel"},
+        {"key": "outer_wall_speed", "direction": "decrease", "note": "e.g. 60->40mm/s"},
+        {"key": "input_shaping_freq_x", "direction": "calibrate", "note": "from resonance test"},
+        {"key": "input_shaping_freq_y", "direction": "calibrate"},
+        {"key": "input_shaping_damp_x", "direction": "calibrate", "note": "~0.1-0.2 start"},
+        {"key": "input_shaping_damp_y", "direction": "calibrate"}
+      ],
+      "hardware_fixes": ["tighten belts and frame fasteners", "ensure gantry rods/rails aren't loose", "reduce moving mass if possible"]
+    },
+    {
+      "id": "top_surface_gaps",
+      "name": "Gaps or holes in top surface / poor top infill",
+      "visual_id": "small pinholes or sagging striped pattern on top flat surface, infill pattern shadow showing through",
+      "causes": [
+        "Too few top solid layers to bridge over sparse infill gaps",
+        "Sparse infill density/pattern too open, top layer sags into gaps",
+        "Under-extrusion or poor cooling on top layers"
+      ],
+      "orca_settings": [
+        {"key": "top_shell_layers", "direction": "increase", "note": "to 5-6+"},
+        {"key": "top_shell_thickness", "direction": "increase"},
+        {"key": "sparse_infill_density", "direction": "increase", "note": "if very low, try 20-30%+"},
+        {"key": "sparse_infill_pattern", "direction": "change", "note": "switch to gyroid/grid, better top-layer support than lines"},
+        {"key": "fan_max_speed", "direction": "increase", "note": "near 100% during top solid infill for PLA"}
+      ],
+      "hardware_fixes": ["verify nozzle isn't partially clogged if issue also appears on walls"]
+    },
+    {
+      "id": "overhang_bridge_sag",
+      "name": "Curling/lifting on overhangs, sagging bridges",
+      "visual_id": "drooping strands or wavy sag under unsupported horizontal spans, rough underside on angled overhangs",
+      "causes": [
+        "Insufficient cooling, filament stays molten too long over open air",
+        "Print speed too fast for bridge to set before next line",
+        "No support generated for steep overhang angles"
+      ],
+      "orca_settings": [
+        {"key": "overhang_fan_speed", "direction": "increase", "note": "near 100% PLA/PETG, keep low for ABS/ASA"},
+        {"key": "bridge_speed", "direction": "decrease", "note": "~20-30mm/s"},
+        {"key": "internal_bridge_speed", "direction": "decrease"},
+        {"key": "bridge_flow", "direction": "decrease", "note": "~95% to prevent sag from over-extrusion"},
+        {"key": "enable_support", "direction": "enable"},
+        {"key": "support_threshold_angle", "direction": "decrease", "note": "e.g. 45deg so supports generate for steeper overhangs"},
+        {"key": "overhang_fan_threshold", "direction": "decrease", "note": "so cooling kicks in earlier on shallower overhangs"}
+      ],
+      "hardware_fixes": ["ensure part-cooling fan/duct isn't obstructed or misdirected"]
+    },
+    {
+      "id": "nozzle_clog",
+      "name": "Nozzle clogs / clicking extruder (skipped steps)",
+      "visual_id": "no visible defect until under/no-extrusion appears; audibly diagnosed (repetitive clicking/grinding from extruder)",
+      "causes": [
+        "Partial/full nozzle clog (debris, burnt filament, moisture bubbles)",
+        "Nozzle temp too low for material/speed combo",
+        "Extruder tension too tight (grinding filament) or too loose"
+      ],
+      "orca_settings": [
+        {"key": "nozzle_temperature", "direction": "increase", "note": "+5-10C if borderline for material"},
+        {"key": "outer_wall_speed", "direction": "decrease", "note": "lower required flow rate"},
+        {"key": "filament_flow_ratio", "direction": "decrease", "note": "temporarily, if forcing material through partial clog"}
+      ],
+      "hardware_fixes": ["cold pull", "run cleaning wire through nozzle at ~250C", "dry filament if PETG/nylon/PC", "adjust extruder idler tension screw", "replace worn nozzle", "check PTFE tubing seated fully"]
+    },
+    {
+      "id": "layer_cracking",
+      "name": "Cracking/splitting along layer lines (esp. ABS/ASA)",
+      "visual_id": "visible split/delamination between layers, part breaks cleanly along a horizontal layer plane",
+      "causes": [
+        "Insufficient interlayer bonding from rapid/uneven cooling (thermal stress)",
+        "Nozzle temp too low for full layer fusion",
+        "Cooling fan running when it shouldn't (drafts on ABS/ASA)"
+      ],
+      "orca_settings": [
+        {"key": "nozzle_temperature", "direction": "increase", "note": "+5-10C; ABS/ASA ~250-270C range"},
+        {"key": "fan_min_speed", "direction": "decrease", "note": "0-20% for ABS/ASA"},
+        {"key": "fan_max_speed", "direction": "decrease"},
+        {"key": "outer_wall_speed", "direction": "decrease", "note": "~30-60mm/s for better fusion time"},
+        {"key": "inner_wall_speed", "direction": "decrease"},
+        {"key": "hot_plate_temp", "direction": "increase", "note": "reduce ambient-to-print thermal delta"}
+      ],
+      "hardware_fixes": ["print inside an enclosure (ideally heated)", "eliminate cooling fan drafts entirely for ABS/ASA"]
+    },
+    {
+      "id": "seam_blobs",
+      "name": "Rough/blobby seams (Z-seam visibility)",
+      "visual_id": "vertical line of small bumps/blobs running up one side of an otherwise smooth wall",
+      "causes": [
+        "Retraction/priming imbalance leaving extra material at layer start/stop point",
+        "Seam placement algorithm choosing a visually exposed location",
+        "Print speed too fast at seam transition"
+      ],
+      "orca_settings": [
+        {"key": "seam_position", "direction": "set", "note": "\"nearest\" or \"aligned\" to hide seam in existing geometry"},
+        {"key": "staggered_inner_seams", "direction": "enable", "note": "offset internal wall seams from outer seam"},
+        {"key": "retraction_length", "direction": "increase", "note": "slightly, plus enable wipe/retract_before_wipe"},
+        {"key": "outer_wall_speed", "direction": "decrease", "note": "reduce speed at seam"}
+      ],
+      "hardware_fixes": ["if blobs occur every layer regardless of settings, check for nozzle drool from heat creep"]
+    },
+    {
+      "id": "abs_asa_warping",
+      "name": "Warping specific to ABS/ASA (enclosure-related)",
+      "visual_id": "large flat areas curling/lifting at edges, cracking near base, most severe on tall/wide ABS parts printed in open air",
+      "causes": [
+        "No enclosure, rapid uneven cooling causes internal stress and shrinkage",
+        "Bed temp/chamber temp too low to keep part warm through the print",
+        "Cooling fan active when it should be off/minimal"
+      ],
+      "orca_settings": [
+        {"key": "hot_plate_temp", "direction": "increase", "note": "ABS/ASA ~100-110C"},
+        {"key": "hot_plate_temp_initial_layer", "direction": "increase", "note": "a few degrees higher still"},
+        {"key": "fan_min_speed", "direction": "decrease", "note": "near 0%"},
+        {"key": "fan_max_speed", "direction": "decrease", "note": "near 0%, except overhang_fan_speed where geometry demands it"},
+        {"key": "chamber_temperature", "direction": "set", "note": "40-60C target if printer supports it"},
+        {"key": "brim_width", "direction": "increase", "note": "10mm+ or use a raft for large flat parts"}
+      ],
+      "hardware_fixes": ["build/use a heated or passive enclosure", "eliminate direct airflow (AC vents, open windows) near printer"]
+    }
+  ]
+}

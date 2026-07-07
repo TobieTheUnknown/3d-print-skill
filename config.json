@@ -1,0 +1,29 @@
+{
+  "printer": {
+    "name": "Flashforge Adventurer 5M Pro (klipper)",
+    "host": "192.168.1.117",
+    "moonraker_port": 7125,
+    "mainsail_port": 4000,
+    "webcam_port": 8080,
+    "webcam_snapshot_path": "/snapshot",
+    "webcam_stream_path": "/stream",
+    "firmware": "klipper"
+  },
+  "orcaslicer": {
+    "binary": "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
+    "datadir": "~/Library/Application Support/OrcaSlicer",
+    "bundled_profiles_dir": "/Applications/OrcaSlicer.app/Contents/Resources/profiles",
+    "user_profiles_dir": "~/Library/Application Support/OrcaSlicer/user/default"
+  },
+  "jobs_dir": "~/Documents/3D-Prints",
+  "monitoring": {
+    "phase1_interval_seconds": 180,
+    "phase1_duration_seconds": 1200,
+    "phase2_interval_seconds": 600
+  },
+  "defaults": {
+    "printer_profile": "Flashforge Adventurer 5M Pro 0.4 Nozzle",
+    "process_profile": "0.20mm Standard @Flashforge AD5M Pro 0.4 Nozzle",
+    "filament_profile": "Flashforge PLA Basic"
+  }
+}
