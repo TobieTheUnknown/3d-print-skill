@@ -54,7 +54,7 @@ This resolves and stores `defaults.printer_profile` / `defaults.process_profile`
 | List quality/process profiles | `scripts/orca_slice.py list-processes --vendor Flashforge --printer "<printer name>"` |
 | Create a custom printer profile | `scripts/create_printer_profile.py --name X --inherits "<base>" --set key=value` |
 | Create a custom filament profile | `scripts/create_filament_profile.py --name X --inherits "<base>" --set key=value` |
-| Slice | `scripts/orca_slice.py slice <stl> --printer X --filament Y --process Z --outdir DIR [--infill N] [--supports auto\|tree\|none] [--layer-height H] [--brim W]` |
+| Slice | `scripts/orca_slice.py slice <stl> --printer X --filament Y --process Z --outdir DIR [--infill N] [--supports auto\|tree\|none] [--layer-height H] [--brim W] [--bed-type cool\|engineering\|hot\|textured]` |
 | Upload g-code (does NOT print) | `scripts/moonraker_client.py upload <gcode> ` |
 | Upload + start immediately | `scripts/moonraker_client.py upload <gcode> --start` |
 | Start an already-uploaded file | `scripts/moonraker_client.py start <filename>` |
@@ -105,13 +105,20 @@ Common override keys: `retraction_length`, `nozzle_temperature`, `hot_plate_temp
 
 ```
 python3 scripts/orca_slice.py slice "<stl>" --printer "<name>" --filament "<name>" \
-  --process "<name>" --outdir ~/Documents/3D-Prints/<slug> --infill <N> --supports <auto|tree|none>
+  --process "<name>" --outdir ~/Documents/3D-Prints/<slug> --infill <N> --supports <auto|tree|none> \
+  --bed-type <cool|engineering|hot|textured>
 ```
 
-Report the `estimate` block (time, filament grams/mm) to the user plainly, e.g. "≈3h37m, ~27g of
+`--bed-type` defaults to `textured` (config.json's `defaults.bed_type`) which is what ships with
+the AD5M Pro, but ask if unsure — picking the wrong one means the wrong bed temperature gets used
+(confirmed to cause a real failed print: "Cool Plate" default = 35°C instead of the correct 55-60°C,
+which reads fine in the estimate but was actually silently wrong). See the CLI gotchas section.
+
+Report the `estimate` block (time, filament grams/mm) to the user plainly, e.g. "≈1h06m, ~26g of
 filament". If `returncode` != 0, read `stderr_tail` — most failures are a profile name typo or a
 missing `--allow-newer-file`-style version mismatch; the script already handles the common Klipper
-"G92 E0 in layer_change_gcode" quirk automatically.
+"G92 E0 in layer_change_gcode" quirk, the `inherits`-chain resolution bug, native
+START_PRINT/END_PRINT macros, and bed-type temperature selection automatically.
 
 ### 4. Confirm before printing — mandatory checkpoint
 
@@ -197,3 +204,35 @@ re-break them if you edit the scripts)
   `"type": "machine"|"filament"|"process"` field, even though GUI-saved user presets in
   `~/Library/Application Support/OrcaSlicer/user/default/` omit it (the GUI infers type from
   which subfolder the file lives in; the CLI's `--load-settings` code path does not).
+- **Biggest one, found the hard way on a real print**: `--load-settings` pointed at a single leaf
+  profile path does NOT reliably resolve multi-level `inherits` chains for every key. Scalar
+  settings (temperatures, bed size, speeds) come out correctly resolved; `gcode_flavor` and
+  multi-line gcode-block settings (`machine_start_gcode`, `machine_end_gcode`,
+  `layer_change_gcode`) silently fall back to OrcaSlicer's built-in Marlin defaults instead of the
+  real inherited value. Confirmed via `--export-settings`: a Klipper printer profile (every level
+  of whose inherits chain sets `gcode_flavor: klipper`) resolved to `gcode_flavor: marlin` and a
+  generic `G28 + lift` start gcode. This produced gcode with Marlin `M201/M203/M205` commands
+  Klipper doesn't understand, `M104` (non-blocking) instead of `M109` (wait), and no bed-mesh
+  leveling — the printer tried to extrude before reaching temperature and errored out mid-print.
+  Fix: `orca_slice.py`'s `_flatten_profile()` walks `inherits` itself in Python and writes one
+  fully-merged JSON per profile before slicing. Don't go back to passing raw leaf paths.
+- `curr_bed_type` (which physical build plate is installed — Cool/Engineering/High Temp/Textured
+  PEI, each with its own temp) is NOT a preset-file setting at all — it lives in OrcaSlicer's
+  plater/session state, not in any machine/filament/process JSON, so putting it in a profile file
+  has zero effect. It must be passed as its own CLI override: `--curr-bed-type="High Temp Plate"`
+  (exact label string; numeric values are rejected). Get this wrong and a filament's real
+  `hot_plate_temp`/`textured_plate_temp` never gets used — it silently prints at the "Cool Plate"
+  default (35°C) instead, which is how the AD5M Pro's first real test print got cancelled by
+  Klipper's `min_extrude_temp` safety check. Ask the user which physical plate is installed
+  (`orca_slice.py`'s `BED_TYPES` dict has the four options) rather than assuming — this repo
+  defaults to `"textured"` because that's what ships with the AD5M Pro, override per printer.
+- This printer's actual Klipper config (`xblax/flashforge_ad5m_klipper_mod`) defines its own
+  `START_PRINT`/`END_PRINT` gcode macros (query `/printer/objects/list` over Moonraker, or fetch
+  `/server/files/config/macros.cfg`, to check on a different printer). `START_PRINT` does
+  everything the bundled Flashforge `machine_start_gcode` does (heat, wait, purge — its
+  `_PRIME_NOZZLE` sub-macro is a literal copy of Orca's purge line) **plus** `AUTO_BED_LEVEL` when
+  no mesh is loaded, which the raw gcode skips entirely. `orca_slice.py`'s
+  `_use_native_klipper_print_macros()` replaces `machine_start_gcode`/`machine_end_gcode` with
+  `START_PRINT BED_TEMP=... EXTRUDER_TEMP=...` / `END_PRINT` for any Klipper-flavor machine
+  profile. If you add support for a printer whose Klipper config does NOT define these macros,
+  this override would break it — check `/printer/objects/list` first.

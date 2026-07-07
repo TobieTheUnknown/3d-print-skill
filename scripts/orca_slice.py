@@ -137,26 +137,87 @@ def _resolve_profile_path(kind: str, name: str, vendor: str = None) -> Path:
 SCRATCH_DIR = Path.home() / "Library/Caches/3d-print-skill"
 
 
-def _ensure_klipper_layer_reset(process_path: Path) -> Path:
-    """Klipper printers using relative-E need 'G92 E0' in layer_change_gcode, or OrcaSlicer
-    refuses to slice ('Relative extruder addressing requires resetting the extruder position').
-    Patches a scratch copy of the process preset rather than mutating the original."""
-    data = json.loads(process_path.read_text())
-    if data.get("layer_change_gcode"):
-        return process_path
-    data["layer_change_gcode"] = "G92 E0"
+def _flatten_profile(kind: str, name: str, vendor: str = None, _seen: set = None) -> dict:
+    """Recursively resolve the 'inherits' chain in Python and return one fully-merged dict.
+
+    OrcaSlicer's CLI --load-settings, when pointed at a single leaf profile path, does NOT
+    reliably walk multi-level 'inherits' chains for every key: scalar settings (temperatures,
+    bed size, speeds) come out correctly resolved, but multi-line gcode-block settings and
+    gcode_flavor silently fall back to OrcaSlicer's built-in Marlin defaults instead of the
+    vendor's actual (e.g. Klipper) values -- confirmed via --export-settings on this profile:
+    gcode_flavor resolved to 'marlin' and machine_start_gcode resolved to a generic 'G28 + lift'
+    stub, even though every level of the real inherits chain sets gcode_flavor=klipper and a
+    proper temperature-wait + prime sequence. Flattening ourselves and loading ONE fully-merged
+    file sidesteps whatever internal caching/diff logic causes that.
+    """
+    if _seen is None:
+        _seen = set()
+    if name in _seen:
+        raise ValueError(f"circular inherits chain while flattening {kind} '{name}'")
+    _seen.add(name)
+
+    path = _resolve_profile_path(kind, name, vendor)
+    data = json.loads(path.read_text())
+    parent_name = data.get("inherits")
+    merged = _flatten_profile(kind, parent_name, vendor, _seen) if parent_name else {}
+    merged.update(data)
+    return merged
+
+
+def _write_scratch_profile(kind: str, name: str, data: dict) -> Path:
     SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
-    patched = SCRATCH_DIR / f"_patched_{process_path.stem}.json"
-    patched.write_text(json.dumps(data, indent=2))
-    return patched
+    safe_name = "".join(c if c.isalnum() or c in " ._-" else "_" for c in name)
+    dest = SCRATCH_DIR / f"_flat_{kind}_{safe_name}.json"
+    dest.write_text(json.dumps(data, indent=2))
+    return dest
+
+
+def _ensure_klipper_layer_reset(data: dict) -> dict:
+    """Klipper printers using relative-E need 'G92 E0' actually present in layer_change_gcode
+    (the vendor default is just a '[layer_z]' comment placeholder, not a real reset), or
+    OrcaSlicer refuses to slice ('Relative extruder addressing requires resetting the
+    extruder position')."""
+    if "G92 E0" not in (data.get("layer_change_gcode") or ""):
+        data["layer_change_gcode"] = (data.get("layer_change_gcode", "") + "\nG92 E0").strip()
+    return data
+
+
+def _use_native_klipper_print_macros(data: dict) -> dict:
+    """The bundled Flashforge machine_start_gcode hand-rolls G28 + M190/M109 + a manual purge
+    line -- it's a copy of stock-firmware behavior. This printer's actual Klipper config
+    (xblax/flashforge_ad5m_klipper_mod's macros.cfg) defines START_PRINT/END_PRINT macros that
+    do the same heating+purge (their _PRIME_NOZZLE is literally a copy of this same purge
+    sequence) but ALSO run AUTO_BED_LEVEL when no mesh is loaded. Calling the raw gcode instead
+    of the macro silently skips bed mesh calibration. Only applies when gcode_flavor is klipper."""
+    if data.get("gcode_flavor") != "klipper":
+        return data
+    data["machine_start_gcode"] = (
+        "START_PRINT BED_TEMP=[bed_temperature_initial_layer_single] "
+        "EXTRUDER_TEMP=[nozzle_temperature_initial_layer]"
+    )
+    data["machine_end_gcode"] = "END_PRINT"
+    return data
+
+
+BED_TYPES = {
+    "cool": "Cool Plate",
+    "engineering": "Engineering Plate",
+    "hot": "High Temp Plate",
+    "textured": "Textured PEI Plate",
+}
+DEFAULT_BED_TYPE = "textured"  # stock plate shipped with the Flashforge AD5M Pro (60C)
 
 
 def slice_model(stl_path: str, printer: str, filament: str, process: str, outdir: str,
                  infill: int = None, layer_height: float = None, supports: str = None,
-                 brim: float = None, extra: dict = None) -> dict:
-    machine_path = _resolve_profile_path("machine", printer)
-    filament_path = _resolve_profile_path("filament", filament)
-    process_path = _ensure_klipper_layer_reset(_resolve_profile_path("process", process))
+                 brim: float = None, bed_type: str = DEFAULT_BED_TYPE, extra: dict = None) -> dict:
+    machine_data = _use_native_klipper_print_macros(_flatten_profile("machine", printer))
+    filament_data = _flatten_profile("filament", filament)
+    process_data = _ensure_klipper_layer_reset(_flatten_profile("process", process))
+
+    machine_path = _write_scratch_profile("machine", printer, machine_data)
+    filament_path = _write_scratch_profile("filament", filament, filament_data)
+    process_path = _write_scratch_profile("process", process, process_data)
 
     out_dir = Path(outdir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +230,14 @@ def slice_model(stl_path: str, printer: str, filament: str, process: str, outdir
         "--allow-newer-file",
         "--outputdir", str(out_dir),
     ]
+
+    # curr_bed_type isn't a preset-file setting (Orca stores it as plater/session state, not in
+    # machine/process/filament JSON) -- it MUST be passed as its own CLI override, or Orca
+    # silently falls back to "Cool Plate" (35C) regardless of the filament's intended
+    # hot_plate_temp/textured_plate_temp values. Confirmed by testing: setting curr_bed_type
+    # inside the machine JSON has zero effect; only the CLI flag with the plate's exact label
+    # string works (numeric values are rejected outright).
+    cmd += [f"--curr-bed-type={BED_TYPES.get(bed_type, bed_type)}"]
 
     if infill is not None:
         cmd += [f"--sparse-infill-density={infill}%"]
@@ -260,12 +329,15 @@ def main():
     p_s.add_argument("--layer-height", type=float)
     p_s.add_argument("--supports", choices=list(SUPPORT_TYPE_MAP.keys()))
     p_s.add_argument("--brim", type=float)
+    p_s.add_argument("--bed-type", dest="bed_type", default=DEFAULT_BED_TYPE, choices=list(BED_TYPES.keys()),
+                      help="physical build plate installed; determines bed temp used (default: hot -> 50/55C)")
     p_s.add_argument("--extra", action="append", default=[], help="key=value, repeatable")
 
     def _do_slice(a):
         extra = dict(kv.split("=", 1) for kv in a.extra)
         info = slice_model(a.stl_path, a.printer, a.filament, a.process, a.outdir,
-                            a.infill, a.layer_height, a.supports, a.brim, extra)
+                            infill=a.infill, layer_height=a.layer_height, supports=a.supports,
+                            brim=a.brim, bed_type=a.bed_type, extra=extra)
         print(json.dumps(info, indent=2))
         if info["returncode"] != 0 or not info["gcode_files"]:
             sys.exit(1)

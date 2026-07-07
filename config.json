@@ -24,6 +24,8 @@
   "defaults": {
     "printer_profile": "Flashforge Adventurer 5M Pro 0.4 Nozzle",
     "process_profile": "0.20mm Standard @Flashforge AD5M Pro 0.4 Nozzle",
-    "filament_profile": "Flashforge PLA Basic"
+    "filament_profile": "Flashforge PLA Basic",
+    "_note": "Flashforge PLA Silk - tuned exists (lower nozzle temp + more retraction, fixes light stringing seen on the sink-strainer print) but is not auto-selected -- pick it explicitly next time PLA Silk is used.",
+    "bed_type": "textured"
   }
 }
