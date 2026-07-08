@@ -31,13 +31,19 @@ Run once, or whenever the printer's IP/model changes:
 python3 scripts/setup.py probe --host <ip>
 ```
 
-This detects Klipper/Moonraker, Mainsail, and the webcam automatically. Then confirm the exact
-printer model and nozzle with the user (AskUserQuestion — do not guess between AD5M and AD5M Pro,
-they take different bundled profiles) and write it to `config.json`:
+This detects Klipper/Moonraker, Mainsail, and the webcam automatically. Then confirm two things
+with the user (AskUserQuestion — don't guess either one):
+- the exact printer model and nozzle (do not guess between AD5M and AD5M Pro, they take different
+  bundled profiles)
+- monitoring mode: `auto_analysis` if the model running this skill has real vision, otherwise
+  `screenshot_only` (see step 5 of the workflow below)
+
+and write it to `config.json`:
 
 ```
 python3 scripts/setup.py apply --host <ip> --model "Flashforge Adventurer 5M Pro" --nozzle 0.4 \
-  [--default-filament "Flashforge PLA Basic"] [--default-process-quality "0.20mm Standard"]
+  [--default-filament "Flashforge PLA Basic"] [--default-process-quality "0.20mm Standard"] \
+  [--monitoring-mode auto_analysis|screenshot_only]
 ```
 
 This resolves and stores `defaults.printer_profile` / `defaults.process_profile` /
@@ -138,6 +144,19 @@ python3 scripts/moonraker_client.py upload "<gcode>" --start
 
 ### 5. Monitor the print
 
+Check `config.json`'s `monitoring.mode` first — set once at setup time (`setup.py apply
+--monitoring-mode auto_analysis|screenshot_only`), not decided ad hoc per print. If it's missing
+or you're unsure which the user wants, ask once via AskUserQuestion and run `setup.py apply` (or
+edit `config.json` directly) to persist the choice rather than re-asking every print.
+
+- **`auto_analysis`** (default — use when the model running this skill has real vision): you look
+  at each snapshot yourself and cross-check it against `data/troubleshooting.json`.
+- **`screenshot_only`** (use for non-vision or weak-vision/local models): skip step 4's visual
+  defect comparison entirely — just post the photo + status and say so explicitly ("skipping
+  auto-analysis, mode=screenshot_only — take a look"). Rely on the user to flag problems; if they
+  do, THEN cross-reference their description against `data/troubleshooting.json` same as step 6.
+  Don't pretend to have visually checked something you didn't look at.
+
 Cadence (per user preference): a webcam snapshot every **3 minutes for the first ~20 minutes**
 (the highest-risk window — bed adhesion, first layers, warping), then every **10 minutes**
 afterward until the print completes or fails. For each check:
@@ -146,14 +165,18 @@ afterward until the print completes or fails. For each check:
 2. `python3 scripts/moonraker_client.py status` — get progress %, current layer, state.
 3. Read the snapshot image (Read tool) and post it to the user (SendUserFile, status: proactive)
    with a one-line note: progress %, elapsed/remaining, anything visually notable.
-4. Look at the image yourself. Compare against `data/troubleshooting.json` (`defects[].visual_id`)
-   for early signs of stringing, warping/lifting, layer shift, poor adhesion, etc.
+4. **Only in `auto_analysis` mode**: look at the image yourself. Compare against
+   `data/troubleshooting.json` (`defects[].visual_id`) for early signs of stringing,
+   warping/lifting, layer shift, poor adhesion, etc.
    - **Minor/cosmetic issue, print still viable**: note it in your update to the user, keep
      monitoring. Do not change slicer settings mid-print — the gcode is already committed.
    - **Severe failure** (detached from bed / spaghetti / obvious layer shift ruining the part):
      alert the user immediately with the photo and your read of it, and ask whether to
      `moonraker_client.py cancel` — pausing/cancelling a physical print is exactly the kind of
      hard-to-reverse action that needs a go-ahead, don't do it unprompted.
+   In `screenshot_only` mode, the user plays this role instead — if they say something looks
+   wrong, treat it exactly like a self-spotted severe failure above (offer to cancel, don't do it
+   unprompted).
 5. Between checks, use ScheduleWakeup with the interval above so you resume automatically —
    this is a multi-hour process, don't try to sleep/poll synchronously.
 6. Stop monitoring when `status` reports `state` = `complete`, `error`, or `cancelled`.

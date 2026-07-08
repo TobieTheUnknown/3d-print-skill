@@ -17,6 +17,11 @@
   },
   "jobs_dir": "~/Documents/3D-Prints",
   "monitoring": {
+    "mode": "auto_analysis",
+    "mode_options": {
+      "auto_analysis": "agent visually checks each snapshot itself against data/troubleshooting.json (needs a vision-capable model)",
+      "screenshot_only": "agent just posts snapshots + status for the user to judge (use for non-vision/local models)"
+    },
     "phase1_interval_seconds": 180,
     "phase1_duration_seconds": 1200,
     "phase2_interval_seconds": 600

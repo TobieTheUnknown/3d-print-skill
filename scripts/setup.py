@@ -9,8 +9,14 @@ Usage:
 
   setup.py apply --host 192.168.1.117 --model "Flashforge Adventurer 5M Pro" --nozzle 0.4 \
       [--moonraker-port 7125] [--webcam-port 8080] [--mainsail-port 4000] \
-      [--default-filament "Flashforge PLA Basic"] [--default-process-quality "0.20mm Standard"]
-      # probes + writes config.json with resolved printer/process/filament names
+      [--default-filament "Flashforge PLA Basic"] [--default-process-quality "0.20mm Standard"] \
+      [--monitoring-mode auto_analysis|screenshot_only]
+      # probes + writes config.json with resolved printer/process/filament names.
+      # --monitoring-mode: ask the user which one during setup, don't assume --
+      #   auto_analysis    : agent visually checks each snapshot itself against the
+      #                      troubleshooting dictionary (needs a vision-capable model)
+      #   screenshot_only  : agent just posts snapshots + status on the configured cadence
+      #                      and lets the user judge (use this for non-vision/local models)
 """
 import argparse
 import json
@@ -93,8 +99,17 @@ def resolve_process_profile(printer_name: str, quality: str) -> dict:
     return candidates[0]
 
 
+MONITORING_MODES = {
+    "auto_analysis": "The agent looks at each webcam snapshot itself (vision) and compares it "
+                      "against data/troubleshooting.json to catch defects early.",
+    "screenshot_only": "The agent does NOT attempt visual defect analysis -- it just posts each "
+                        "snapshot + status to the user on the configured cadence for them to judge. "
+                        "Use this if the model running the skill has no/weak vision.",
+}
+
+
 def apply(host: str, model: str, nozzle: str, moonraker_port: int, webcam_port: int, mainsail_port: int,
-          default_filament: str, default_process_quality: str) -> dict:
+          default_filament: str, default_process_quality: str, monitoring_mode: str) -> dict:
     findings = probe(host, moonraker_port, webcam_port, mainsail_port)
     printer_profile = resolve_printer_profile(model, nozzle)
     process_profile = resolve_process_profile(printer_profile["name"], default_process_quality)
@@ -106,14 +121,16 @@ def apply(host: str, model: str, nozzle: str, moonraker_port: int, webcam_port: 
     cfg["printer"]["mainsail_port"] = mainsail_port
     cfg["printer"]["firmware"] = findings["firmware"]
     cfg["printer"]["name"] = f"{model} ({findings['firmware']})"
-    cfg["defaults"] = {
+    cfg.setdefault("defaults", {}).update({
         "printer_profile": printer_profile["name"],
         "process_profile": process_profile["name"],
         "filament_profile": default_filament,
-    }
+    })
+    cfg.setdefault("monitoring", {})["mode"] = monitoring_mode
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
 
-    return {"probe": findings, "resolved": cfg["defaults"], "config_written_to": str(CONFIG_PATH)}
+    return {"probe": findings, "resolved": cfg["defaults"], "monitoring_mode": monitoring_mode,
+            "config_written_to": str(CONFIG_PATH)}
 
 
 def main():
@@ -136,8 +153,13 @@ def main():
     p_apply.add_argument("--mainsail-port", type=int, default=4000)
     p_apply.add_argument("--default-filament", default="Flashforge PLA Basic")
     p_apply.add_argument("--default-process-quality", default="0.20mm Standard")
+    p_apply.add_argument("--monitoring-mode", choices=list(MONITORING_MODES.keys()), default="auto_analysis",
+                          help="auto_analysis: agent does vision defect-checking itself. "
+                               "screenshot_only: agent just posts photos for the user to judge "
+                               "(pick this if the model running the skill has no/weak vision).")
     p_apply.set_defaults(func=lambda a: apply(a.host, a.model, a.nozzle, a.moonraker_port, a.webcam_port,
-                                               a.mainsail_port, a.default_filament, a.default_process_quality))
+                                               a.mainsail_port, a.default_filament, a.default_process_quality,
+                                               a.monitoring_mode))
 
     args = parser.parse_args()
     print(json.dumps(args.func(args), indent=2))
